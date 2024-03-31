@@ -48,7 +48,7 @@ def main():
         with MailBox('imap.gmail.com').xoauth2(username, access_token) as mailbox:
             for msg in mailbox.fetch():
                 print(f"---- New email received ----\nFrom: {msg.from_}\nSubject: {msg.subject}\n----------------------------")
-                if msg.subject == "flag":
+                if msg.subject == "get_flag()":
                     with open("flag.txt", "r") as f:
                         FLAG = f.readline().strip()
                     send_email(msg.from_, "Re: " + msg.subject, f"{FLAG}")
