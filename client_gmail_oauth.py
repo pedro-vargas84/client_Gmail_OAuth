@@ -8,31 +8,49 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from google.auth.exceptions import RefreshError
 from imap_tools import MailBox
 import pyioga
 
-# Configuration and logging setup (simplified)
+IMAP_SERVER = 'imap.gmail.com'
 SMTP_SERVER = 'smtp.gmail.com'
 SMTP_PORT = 587
+SMTP_EMAIL = "example_user@gmail.com"
 SCOPES = ['https://mail.google.com/']
 logging.basicConfig(level=logging.INFO)
 
+TOKEN_FILE = './oauth_credentials/token.json'
+CREDENTIALS_FILE = './oauth_credentials/credentials.json'
+
 def authenticate_and_get_token():
     creds = None
-    if os.path.exists('./oauth_credentials/token.json'):
-        creds = Credentials.from_authorized_user_file('./oauth_credentials/token.json', SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file('./oauth_credentials/credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open('./oauth_credentials/token.json', 'w') as token:
+    try:
+        if os.path.exists(TOKEN_FILE):
+            creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+                creds = flow.run_local_server(port=0)
+                with open(TOKEN_FILE, 'w') as token:
+                    token.write(creds.to_json())
+    except RefreshError as e:
+        logging.error(f"RefreshError: {e}. Re-authenticating.")
+        # Re-initiate the authentication flow
+        flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+        creds = flow.run_local_server(port=0)
+        with open(TOKEN_FILE, 'w') as token:
             token.write(creds.to_json())
-    return creds.token
+
+    return creds.token if creds else None
 
 def send_email(recipient, subject, content):
     token = authenticate_and_get_token()
+    if not token:
+        logging.error("Failed to obtain a valid token. Email not sent.")
+        return False
+    
     session = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
     session.starttls()
     auth_string = b'user=' + bytes(SMTP_EMAIL, 'ascii') + b'\1auth=Bearer ' + token.encode() + b'\1\1'
@@ -42,10 +60,15 @@ def send_email(recipient, subject, content):
     session.quit()
 
 def main():
-    username = "user@example.com"
-    access_token = pyioga.get_access_token("oauth_gmail/token.json")
+    # Setup the key files
+    username = SMTP_EMAIL
+    if not os.path.exists(TOKEN_FILE):
+        authenticate_and_get_token()
+    access_token = pyioga.get_access_token(TOKEN_FILE)
+
+    # Loop receiving and sending emails
     while True:
-        with MailBox('imap.gmail.com').xoauth2(username, access_token) as mailbox:
+        with MailBox(IMAP_SERVER).xoauth2(username, access_token) as mailbox:
             for msg in mailbox.fetch():
                 print(f"---- New email received ----\nFrom: {msg.from_}\nSubject: {msg.subject}\n----------------------------")
                 if msg.subject == "get_flag()":
@@ -59,3 +82,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
